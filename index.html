@@ -84,6 +84,10 @@ let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
 
+// DADOS FIXOS PARA SIMULAR BANCO DE DADOS COMPARTILHADO
+const SHARED_ORDERS_KEY = 'delivery_shared_orders';
+const SHARED_NOTIFICATIONS_KEY = 'delivery_shared_notifications';
+
 function loadFromStorage() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -92,16 +96,28 @@ function loadFromStorage() {
       const now = Date.now();
       
       if (now - data.timestamp < SESSION_DURATION) {
-        orders = data.orders || [];
-        notifications = data.notifications || [];
+        cart = data.cart || [];
         userNotifications = data.userNotifications || [];
-        unreadNotifications = data.unreadNotifications || 0;
         unreadUserNotifications = data.unreadUserNotifications || 0;
-        updateNotificationCounter();
         updateUserNotificationCounter();
       } else {
-        clearStorage();
+        clearUserStorage();
       }
+    }
+    
+    // CARREGAR DADOS COMPARTILHADOS
+    const sharedOrders = localStorage.getItem(SHARED_ORDERS_KEY);
+    const sharedNotifications = localStorage.getItem(SHARED_NOTIFICATIONS_KEY);
+    
+    if (sharedOrders) {
+      orders = JSON.parse(sharedOrders);
+    }
+    
+    if (sharedNotifications) {
+      const notifData = JSON.parse(sharedNotifications);
+      notifications = notifData.notifications || [];
+      unreadNotifications = notifData.unreadNotifications || 0;
+      updateNotificationCounter();
     }
   } catch (e) {
     console.error('Erro ao carregar dados:', e);
@@ -110,15 +126,21 @@ function loadFromStorage() {
 }
 
 function saveToStorage() {
-  const data = {
-    orders: orders,
-    notifications: notifications,
+  const userData = {
+    cart: cart,
     userNotifications: userNotifications,
-    unreadNotifications: unreadNotifications,
     unreadUserNotifications: unreadUserNotifications,
     timestamp: Date.now()
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+  
+  // SALVAR DADOS COMPARTILHADOS
+  localStorage.setItem(SHARED_ORDERS_KEY, JSON.stringify(orders));
+  localStorage.setItem(SHARED_NOTIFICATIONS_KEY, JSON.stringify({
+    notifications: notifications,
+    unreadNotifications: unreadNotifications
+  }));
 }
 
 function clearStorage() {
@@ -127,6 +149,15 @@ function clearStorage() {
   userNotifications = [];
   orders = [];
   unreadNotifications = 0;
+  unreadUserNotifications = 0;
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(SHARED_ORDERS_KEY);
+  localStorage.removeItem(SHARED_NOTIFICATIONS_KEY);
+}
+
+function clearUserStorage() {
+  cart = [];
+  userNotifications = [];
   unreadUserNotifications = 0;
   localStorage.removeItem(STORAGE_KEY);
 }
@@ -368,7 +399,7 @@ function clearCart(){
 async function getEnderecoFromCoords(lat, lng) {
   try {
     const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
-    const data = await response.json();
+    const data = await JSON.parse(response);
     
     if(data && data.address) {
       const addr = data.address;
