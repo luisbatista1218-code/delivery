@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -9,7 +8,7 @@
 <!-- Firebase -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+  import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, onSnapshot, query, orderBy, where } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDhxzoRmrYhuIwKkFtlF_H36NklLwVXSN0",
@@ -26,7 +25,7 @@
   window.firebaseApp = app;
   window.db = db;
   window.firestore = {
-    collection, addDoc, getDocs, updateDoc, doc, onSnapshot, query, orderBy
+    collection, addDoc, getDocs, updateDoc, doc, onSnapshot, query, orderBy, where
   };
 </script>
 
@@ -121,6 +120,7 @@ async function salvarPedidoFirebase(pedido) {
     return docRef.id;
   } catch (e) {
     console.error("Erro ao salvar pedido: ", e);
+    throw e;
   }
 }
 
@@ -163,6 +163,43 @@ async function atualizarStatusFirebase(pedidoId, novoStatus) {
   }
 }
 
+async function salvarNotificacaoFirebase(notificacao) {
+  try {
+    await window.firestore.addDoc(window.firestore.collection(window.db, "notificacoes"), {
+      ...notificacao,
+      timestamp: new Date(),
+      lida: false
+    });
+    console.log("Notificação salva no Firebase");
+  } catch (e) {
+    console.error("Erro ao salvar notificação: ", e);
+  }
+}
+
+async function carregarNotificacoesFirebase() {
+  try {
+    const querySnapshot = await window.firestore.getDocs(
+      window.firestore.query(
+        window.firestore.collection(window.db, "notificacoes"),
+        window.firestore.orderBy("timestamp", "desc")
+      )
+    );
+    
+    notifications = [];
+    querySnapshot.forEach((doc) => {
+      notifications.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return notifications;
+  } catch (e) {
+    console.error("Erro ao carregar notificações: ", e);
+    return [];
+  }
+}
+
 function iniciarOuvintePedidos() {
   const q = window.firestore.query(
     window.firestore.collection(window.db, "pedidos"),
@@ -170,20 +207,46 @@ function iniciarOuvintePedidos() {
   );
   
   window.firestore.onSnapshot(q, (snapshot) => {
+    let novosPedidos = 0;
     snapshot.docChanges().forEach((change) => {
       if (change.type === "added") {
         console.log("Novo pedido: ", change.doc.data());
-        unreadNotifications++;
-        updateNotificationCounter();
-      }
-      if (change.type === "modified") {
-        console.log("Pedido modificado: ", change.doc.data());
+        novosPedidos++;
+        
+        // Criar notificação para admin
+        const pedido = change.doc.data();
+        salvarNotificacaoFirebase({
+          tipo: 'novo_pedido',
+          codigo: pedido.codigo,
+          mensagem: `🆕 Novo pedido #${pedido.codigo} - R$ ${pedido.total.toFixed(2)}`,
+          data: new Date().toLocaleString('pt-BR')
+        });
       }
     });
+    
+    if (novosPedidos > 0) {
+      unreadNotifications += novosPedidos;
+      updateNotificationCounter();
+    }
     
     carregarPedidosFirebase().then(() => {
       if (currentView === 'admin') {
         showAdminOrders();
+      }
+    });
+  });
+}
+
+function iniciarOuvinteNotificacoes() {
+  const q = window.firestore.query(
+    window.firestore.collection(window.db, "notificacoes"),
+    window.firestore.orderBy("timestamp", "desc")
+  );
+  
+  window.firestore.onSnapshot(q, (snapshot) => {
+    carregarNotificacoesFirebase().then(() => {
+      if (currentView === 'notifs') {
+        showNotifs();
       }
     });
   });
@@ -280,14 +343,17 @@ async function sendTelegramNotification(pedido) {
     const result = await response.json();
     if (!result.ok) {
       console.error('Erro Telegram:', result);
+      throw new Error('Erro ao enviar para Telegram');
     }
+    return true;
   } catch (error) {
     console.error('Erro ao conectar com Telegram:', error);
+    throw error;
   }
 }
 
 async function sendEmailUpdate(pedido, status) {
-  console.log(`📧 Email (simulado) para: ${pedido.email || 'sem-email'}`);
+  console.log(`📧 Email (simulado) para: ${pedido.whatsapp}`);
   console.log(`Assunto: Atualização do Pedido #${pedido.codigo}`);
   console.log(`Mensagem: Seu pedido foi atualizado para: ${status}`);
 }
@@ -730,28 +796,34 @@ function showUploadComprovante(localizacaoData, descricao) {
         status: 'Pedido recebido - Aguardando confirmação do pagamento'
       };
       
-      // SALVAR NO FIREBASE
-      const pedidoId = await salvarPedidoFirebase(pedido);
-      
-      userNotifications.push({
-        codigo: codigoPedido,
-        msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
-        data: pedido.data
-      });
-      
-      addNotification();
-      addUserNotification();
-      saveToStorage();
-      
-      await sendTelegramNotification(pedido);
-      await sendWhatsAppUpdate(pedido, 'Pedido recebido com sucesso!');
-      await sendEmailUpdate(pedido, 'Pedido recebido');
-      
-      alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 Notificação enviada para o administrador!`);
-      
-      cart = [];
-      saveToStorage();
-      showHome();
+      try {
+        // SALVAR NO FIREBASE
+        const pedidoId = await salvarPedidoFirebase(pedido);
+        
+        // ENVIAR PARA TELEGRAM
+        await sendTelegramNotification(pedido);
+        
+        userNotifications.push({
+          codigo: codigoPedido,
+          msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
+          data: pedido.data
+        });
+        
+        addUserNotification();
+        saveToStorage();
+        
+        await sendWhatsAppUpdate(pedido, 'Pedido recebido com sucesso!');
+        await sendEmailUpdate(pedido, 'Pedido recebido');
+        
+        alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 Notificação enviada para o administrador!`);
+        
+        cart = [];
+        saveToStorage();
+        showHome();
+      } catch (error) {
+        alert('❌ Erro ao finalizar pedido. Tente novamente.');
+        console.error('Erro:', error);
+      }
     };
     
     reader.onerror = function() {
@@ -762,21 +834,25 @@ function showUploadComprovante(localizacaoData, descricao) {
   };
 }
 
-function showNotifs(){
+async function showNotifs(){
   currentView = 'notifs';
   unreadNotifications = 0;
   updateNotificationCounter();
+  
+  document.getElementById('view').innerHTML = '<div class="loading">📋 Carregando notificações...</div>';
+  
+  await carregarNotificacoesFirebase();
   
   let html = '<h3>Notificações do Sistema</h3>';
   
   if(notifications.length === 0){ 
     html += '<p>Nenhuma notificação.</p>';
   } else {
-    notifications.slice().reverse().forEach(notif => {
+    notifications.forEach(notif => {
       html += `<div class='card'>
-        <b>Pedido #${notif.codigo}</b>
-        <div>${notif.msg}</div>
-        <small>${notif.data}</small>
+        <b>${notif.mensagem || notif.msg}</b>
+        <div>${notif.tipo === 'novo_pedido' ? '📦 Novo Pedido' : '🔄 Atualização'}</div>
+        <small>${notif.data || new Date(notif.timestamp?.toDate()).toLocaleString('pt-BR')}</small>
       </div>`;
     });
   }
@@ -858,9 +934,18 @@ async function atualizarStatus(pedidoId, novoStatus){
   if (success) {
     const pedido = orders.find(o => o.id === pedidoId);
     if (pedido) {
+      // Criar notificação para o usuário
       userNotifications.push({
         codigo: pedido.codigo,
         msg: `🔄 Pedido #${pedido.codigo} atualizado: ${novoStatus}`,
+        data: new Date().toLocaleString('pt-BR')
+      });
+      
+      // Criar notificação para admin
+      await salvarNotificacaoFirebase({
+        tipo: 'atualizacao_pedido',
+        codigo: pedido.codigo,
+        mensagem: `🔄 Pedido #${pedido.codigo} atualizado para: ${novoStatus}`,
         data: new Date().toLocaleString('pt-BR')
       });
       
@@ -900,9 +985,9 @@ setTimeout(() => {
   loadFromStorage();
   showHome();
   iniciarOuvintePedidos();
+  iniciarOuvinteNotificacoes();
 }, 1000);
 </script>
 
 </body>
 </html>
-```
