@@ -45,9 +45,9 @@
   .upload-area {border: 2px dashed #ccc; padding: 25px; text-align: center; margin: 12px 0; border-radius: 10px; transition:0.3s;}
   .upload-area.active {border-color: #3a0060; background: #f9f9f9;}
   .file-info {background: #e8f4fd; padding: 12px; border-radius: 6px; margin: 12px 0; color: #000; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
-  .btn {background: #3a0060; color: white; padding: 12px 18px; border: none; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s;}
+  .btn {background: #3a0060; color: white; padding: 12px 18px; border: none; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s; display:block; width:100%; box-sizing:border-box;}
   .btn:hover {background: #5a0080;}
-  .btn-ghost {background: #fff; color: #3a0060; padding: 12px 18px; border: 1px solid #3a0060; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s;}
+  .btn-ghost {background: #fff; color: #3a0060; padding: 12px 18px; border: 1px solid #3a0060; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s; display:block; width:100%; box-sizing:border-box;}
   .btn-ghost:hover {background: #f3f3f3;}
   .btn-disabled {background: #ccc; color: #666; cursor: not-allowed;}
   .category-item {padding: 18px; margin: 12px 0; background: #fff; color: #000; border-radius: 10px; cursor: pointer; text-align: center; font-weight:bold; transition:0.2s; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
@@ -63,6 +63,8 @@
   }
   .input-field {width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:16px;}
   a {color: #3a0060; font-weight:bold;}
+  .button-group {display:flex; flex-direction:column; gap:10px; margin-top:15px;}
+  .admin-buttons {display:flex; flex-direction:column; gap:8px; margin-top:10px;}
 </style>
 </head>
 <body>
@@ -173,21 +175,11 @@ async function limparDadosAntigos() {
       window.firestore.where("timestamp", "<", doisDiasAtras)
     );
     
-    const notificacoesQuery = window.firestore.query(
-      window.firestore.collection(window.db, "notificacoes"),
-      window.firestore.where("timestamp", "<", doisDiasAtras)
-    );
-    
     const pedidosSnapshot = await window.firestore.getDocs(pedidosQuery);
-    const notificacoesSnapshot = await window.firestore.getDocs(notificacoesQuery);
     
     const batch = window.firestore.writeBatch(window.db);
     
     pedidosSnapshot.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    
-    notificacoesSnapshot.forEach((doc) => {
       batch.delete(doc.ref);
     });
     
@@ -445,8 +437,10 @@ function showCart(){
     html += `
       <div class='card'>
         <h3>Total: R$ ${total.toFixed(2)}</h3>
-        <button onclick='startCheckout()' class="btn">Finalizar Pedido</button>
-        <button onclick='clearCart()' class="btn-ghost">Limpar Carrinho</button>
+        <div class="button-group">
+          <button onclick='startCheckout()' class="btn">Finalizar Pedido</button>
+          <button onclick='clearCart()' class="btn-ghost">Limpar Carrinho</button>
+        </div>
       </div>`;
   }
   
@@ -583,7 +577,7 @@ function showDadosEntrega(localizacaoData) {
         <input type="text" class="input-field" id="complemento" placeholder="Complemento ou ponto de referência" maxlength="30">
         <input type="hidden" id="mapaUrl" value="${localizacaoData.mapaUrl || ''}">
         
-        <div style="margin-top: 15px;">
+        <div class="button-group">
           <button type="submit" class="btn">Continuar para Pagamento</button>
           <button type="button" class="btn-ghost" onclick="showCart()">← Voltar</button>
         </div>
@@ -666,7 +660,7 @@ function showUploadComprovante(localizacaoData, descricao) {
       
       <div id="fileInfo"></div>
       
-      <div style="margin-top: 15px;">
+      <div class="button-group">
         <button class="btn" id="submitBtn" disabled onclick="finalizarPedidoComComprovante('${localizacaoData.endereco.replace(/'/g, "\\'")}', '${(descricao || '').replace(/'/g, "\\'")}', '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', '${localizacaoData.whatsapp.replace(/'/g, "\\'")}')">✅ Finalizar Pedido</button>
         <button class="btn-ghost" onclick="showDadosEntrega({endereco: '${localizacaoData.endereco.replace(/'/g, "\\'")}', mapaUrl: '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', bairro: '${localizacaoData.bairro.replace(/'/g, "\\'")}', cidade: '${localizacaoData.cidade.replace(/'/g, "\\'")}', estado: '${localizacaoData.estado.replace(/'/g, "\\'")}'})">← Voltar</button>
       </div>
@@ -873,9 +867,11 @@ async function showAdminOrders(){
         <p><strong>Total:</strong> R$ ${pedido.total.toFixed(2)}</p>
         ${comprovanteHtml}
         <p><strong>Itens:</strong> ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}</p>
-        <button class="btn" onclick='atualizarStatus("${pedido.id}","Pagamento confirmado - Preparando pedido")'>✅ Confirmar Pagamento</button>
-        <button class="btn" onclick='atualizarStatus("${pedido.id}","Pedido em rota de entrega")'>🚚 Saiu para Entrega</button>
-        <button class="btn" onclick='atualizarStatus("${pedido.id}","Pedido entregue")'>🎉 Entregue</button>
+        <div class="admin-buttons">
+          <button class="btn" onclick='atualizarStatus("${pedido.id}","Pagamento confirmado - Preparando pedido")'>✅ Confirmar Pagamento</button>
+          <button class="btn" onclick='atualizarStatus("${pedido.id}","Pedido em rota de entrega")'>🚚 Saiu para Entrega</button>
+          <button class="btn" onclick='atualizarStatus("${pedido.id}","Pedido entregue")'>🎉 Entregue</button>
+        </div>
       </div>`;
     });
   }
