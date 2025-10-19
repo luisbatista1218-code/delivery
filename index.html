@@ -4,31 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Delivery App Completo</title>
-
-<!-- Firebase -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, onSnapshot, query, orderBy, where, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyDhxzoRmrYhuIwKkFtlF_H36NklLwVXSN0",
-    authDomain: "deliveryapp-a6c48.firebaseapp.com",
-    projectId: "deliveryapp-a6c48",
-    storageBucket: "deliveryapp-a6c48.firebasestorage.app",
-    messagingSenderId: "547092721941",
-    appId: "1:547092721941:web:b0feaefe7d6265c32bf91c"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  
-  window.firebaseApp = app;
-  window.db = db;
-  window.firestore = {
-    collection, addDoc, getDocs, updateDoc, doc, onSnapshot, query, orderBy, where, deleteDoc, writeBatch
-  };
-</script>
-
 <style>
   body {margin:0;font-family:'Segoe UI',sans-serif;background:#1c0035;color:#fff;}
   .top {display:flex;justify-content:space-between;align-items:center;padding:12px;background:#3a0060;}
@@ -45,9 +20,9 @@
   .upload-area {border: 2px dashed #ccc; padding: 25px; text-align: center; margin: 12px 0; border-radius: 10px; transition:0.3s;}
   .upload-area.active {border-color: #3a0060; background: #f9f9f9;}
   .file-info {background: #e8f4fd; padding: 12px; border-radius: 6px; margin: 12px 0; color: #000; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
-  .btn {background: #3a0060; color: white; padding: 12px 18px; border: none; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s; display:block; width:100%; box-sizing:border-box;}
+  .btn {background: #3a0060; color: white; padding: 12px 18px; border: none; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s;}
   .btn:hover {background: #5a0080;}
-  .btn-ghost {background: #fff; color: #3a0060; padding: 12px 18px; border: 1px solid #3a0060; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s; display:block; width:100%; box-sizing:border-box;}
+  .btn-ghost {background: #fff; color: #3a0060; padding: 12px 18px; border: 1px solid #3a0060; border-radius: 6px; cursor: pointer; margin: 5px; font-weight:bold; transition:0.2s;}
   .btn-ghost:hover {background: #f3f3f3;}
   .btn-disabled {background: #ccc; color: #666; cursor: not-allowed;}
   .category-item {padding: 18px; margin: 12px 0; background: #fff; color: #000; border-radius: 10px; cursor: pointer; text-align: center; font-weight:bold; transition:0.2s; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
@@ -63,7 +38,7 @@
   }
   .input-field {width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:16px;}
   a {color: #3a0060; font-weight:bold;}
-  .button-group {display:flex;flex-direction:column;gap:10px;margin-top:15px;}
+  .finalizar-btn-container {position: sticky; bottom: 70px; background: #1c0035; padding: 15px; margin: -12px; margin-top: 20px;}
 </style>
 </head>
 <body>
@@ -72,10 +47,7 @@
   <button onclick="goBack()">← Voltar</button>
   <button onclick="openContact()">Contato</button>
   <strong>Delivery</strong>
-  <button id="userNotifBtn" class="notification-btn" onclick="openUser()">
-    Usuário/Admin
-    <span id="userNotificationCounter" class="notification-badge" style="display: none">0</span>
-  </button>
+  <button onclick="exportarNotaFiscal()">📄 Nota Fiscal</button>
 </div>
 
 <div class="main">
@@ -96,156 +68,169 @@
 const BOT_TOKEN = '8205702578:AAFw4c3aRUR5oDDhH5WWAdOctM9rPLOIHac';
 const CHAT_ID = '1232955171';
 const STORAGE_KEY = 'delivery_app_data';
+const SESSION_DURATION = 24 * 60 * 60 * 1000;
 
 let cart = [];
 let notifications = [];
-let userNotifications = [];
 let orders = [];
 let currentView = 'home';
 let unreadNotifications = 0;
-let unreadUserNotifications = 0;
 let categories = ["Pizza", "Bebidas", "Sobremesas"];
 let products = [
   {id:1,categoria:"Pizza",nome:"Pizza Calabresa",descricao:"Pizza com borda de requeijão",preco:30.00,imagem:"pizza-calabresa.jpg"}
 ];
+let lastUpdateId = 0;
+let messageIds = {};
+let processedCommands = new Set();
 
-// FIREBASE FUNCTIONS
-async function salvarPedidoFirebase(pedido) {
+async function checkTelegramUpdates() {
   try {
-    const docRef = await window.firestore.addDoc(window.firestore.collection(window.db, "pedidos"), {
-      ...pedido,
-      timestamp: new Date(),
-      status: 'Pedido realizado - Aguardando confirmação do pagamento'
-    });
-    console.log("Pedido salvo no Firebase com ID: ", docRef.id);
-    return docRef.id;
-  } catch (e) {
-    console.error("Erro ao salvar pedido: ", e);
-    throw e;
-  }
-}
-
-async function carregarPedidosFirebase() {
-  try {
-    const querySnapshot = await window.firestore.getDocs(
-      window.firestore.query(
-        window.firestore.collection(window.db, "pedidos"),
-        window.firestore.orderBy("timestamp", "desc")
-      )
-    );
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}`;
+    const response = await fetch(url);
+    const data = await response.json();
     
-    orders = [];
-    querySnapshot.forEach((doc) => {
-      orders.push({
-        id: doc.id,
-        ...doc.data()
+    if (data.ok && data.result.length > 0) {
+      data.result.forEach(update => {
+        if (update.message && update.message.text) {
+          const text = update.message.text;
+          const commandId = `${update.update_id}_${text}`;
+          
+          if (text.startsWith('/status') && !processedCommands.has(commandId)) {
+            processedCommands.add(commandId);
+            processarComandoStatus(text, update.message.from.first_name);
+          }
+        }
+        lastUpdateId = update.update_id;
       });
-    });
-    
-    return orders;
-  } catch (e) {
-    console.error("Erro ao carregar pedidos: ", e);
-    return [];
+    }
+  } catch (error) {
+    console.error('Erro ao verificar atualizações:', error);
   }
 }
 
-async function atualizarStatusFirebase(pedidoId, novoStatus) {
-  try {
-    const pedidoRef = window.firestore.doc(window.db, "pedidos", pedidoId);
-    await window.firestore.updateDoc(pedidoRef, {
-      status: novoStatus,
-      ultimaAtualizacao: new Date()
-    });
-    console.log("Status atualizado com sucesso");
-    return true;
-  } catch (e) {
-    console.error("Erro ao atualizar status: ", e);
-    return false;
+function processarComandoStatus(text, adminNome) {
+  const match = text.match(/\/status(\d+)\s+(\w+)/);
+  if (match) {
+    const codigo = parseInt(match[1]);
+    const status = match[2].toLowerCase();
+    const statusMap = {
+      'pago': '✅ Pagamento confirmado',
+      'preparando': '👨‍🍳 Preparando pedido', 
+      'entrega': '🚚 Saiu para entrega',
+      'entregue': '🎉 Pedido entregue',
+      'cancelado': '❌ Pedido cancelado'
+    };
+    
+    const novoStatus = statusMap[status] || status;
+    atualizarStatusPedido(codigo, novoStatus, adminNome);
   }
 }
 
-async function limparDadosAntigos() {
-  try {
-    const doisDiasAtras = new Date();
-    doisDiasAtras.setDate(doisDiasAtras.getDate() - 2);
+function atualizarStatusPedido(codigo, novoStatus, adminNome) {
+  const pedido = orders.find(o => o.codigo === codigo);
+  if (pedido && pedido.status !== novoStatus) {
+    const statusAnterior = pedido.status;
+    pedido.status = novoStatus;
     
-    const pedidosQuery = window.firestore.query(
-      window.firestore.collection(window.db, "pedidos"),
-      window.firestore.where("timestamp", "<", doisDiasAtras)
+    const notificacaoExistente = notifications.find(n => 
+      n.codigo === codigo && n.msg.includes(novoStatus)
     );
     
-    const pedidosSnapshot = await window.firestore.getDocs(pedidosQuery);
-    
-    const batch = window.firestore.writeBatch(window.db);
-    
-    pedidosSnapshot.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    
-    await batch.commit();
-    console.log("Dados antigos limpos com sucesso");
-  } catch (e) {
-    console.error("Erro ao limpar dados antigos: ", e);
-  }
-}
-
-function iniciarOuvintePedidos() {
-  const q = window.firestore.query(
-    window.firestore.collection(window.db, "pedidos"),
-    window.firestore.orderBy("timestamp", "desc")
-  );
-  
-  window.firestore.onSnapshot(q, (snapshot) => {
-    let novosPedidos = 0;
-    snapshot.docChanges().forEach((change) => {
-      if (change.type === "added") {
-        console.log("Novo pedido: ", change.doc.data());
-        novosPedidos++;
-      }
-    });
-    
-    if (novosPedidos > 0) {
-      unreadNotifications += novosPedidos;
-      updateNotificationCounter();
+    if (!notificacaoExistente) {
+      notifications.push({
+        codigo: codigo,
+        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus} por ${adminNome}`,
+        data: new Date().toLocaleString('pt-BR'),
+        notaFiscal: gerarNotaFiscal(pedido),
+        status: novoStatus
+      });
+      
+      addNotification();
     }
     
-    carregarPedidosFirebase().then(() => {
-      if (currentView === 'admin') {
-        showAdminOrders();
-      }
-    });
-  });
+    saveToStorage();
+    
+    if (messageIds[codigo]) {
+      atualizarMensagemTelegram(codigo, pedido, messageIds[codigo]);
+    }
+    
+    if (currentView === 'notifs') {
+      showNotifs();
+    }
+  }
 }
 
-// LOCALSTORAGE FUNCTIONS
+async function atualizarMensagemTelegram(codigo, pedido, messageId) {
+  const message = `📦 *PEDIDO #${pedido.codigo}* - ${pedido.status}\n\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}`;
+
+  try {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        message_id: messageId,
+        text: message,
+        parse_mode: 'Markdown'
+      })
+    });
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error('Erro ao atualizar mensagem:', result);
+      if (result.error_code === 400) {
+        delete messageIds[codigo];
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao atualizar mensagem:', error);
+  }
+}
+
+setInterval(checkTelegramUpdates, 3000);
+
 function loadFromStorage() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const data = JSON.parse(stored);
-      cart = data.cart || [];
-      userNotifications = data.userNotifications || [];
-      unreadUserNotifications = data.unreadUserNotifications || 0;
-      updateUserNotificationCounter();
+      const now = Date.now();
+      
+      if (now - data.timestamp < SESSION_DURATION) {
+        cart = data.cart || [];
+        notifications = data.notifications || [];
+        orders = data.orders || [];
+        unreadNotifications = data.unreadNotifications || 0;
+        updateNotificationCounter();
+      } else {
+        clearStorage();
+      }
     }
   } catch (e) {
     console.error('Erro ao carregar dados:', e);
+    clearStorage();
   }
 }
 
 function saveToStorage() {
   const data = {
     cart: cart,
-    userNotifications: userNotifications,
-    unreadUserNotifications: unreadUserNotifications
+    notifications: notifications,
+    orders: orders,
+    unreadNotifications: unreadNotifications,
+    timestamp: Date.now()
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
 function clearStorage() {
   cart = [];
-  userNotifications = [];
-  unreadUserNotifications = 0;
+  notifications = [];
+  orders = [];
+  unreadNotifications = 0;
   localStorage.removeItem(STORAGE_KEY);
 }
 
@@ -261,20 +246,6 @@ function updateNotificationCounter() {
     counter.style.display = 'none';
     notifBtn.classList.remove('notification-alert');
   }
-}
-
-function updateUserNotificationCounter() {
-  const counter = document.getElementById('userNotificationCounter');
-  const notifBtn = document.getElementById('userNotifBtn');
-  
-  if (unreadUserNotifications > 0) {
-    counter.style.display = 'flex';
-    counter.textContent = unreadUserNotifications > 99 ? '99+' : unreadUserNotifications;
-    notifBtn.classList.add('notification-alert');
-  } else {
-    counter.style.display = 'none';
-    notifBtn.classList.remove('notification-alert');
-  }
   saveToStorage();
 }
 
@@ -283,15 +254,49 @@ function addNotification() {
   updateNotificationCounter();
 }
 
-function addUserNotification() {
-  unreadUserNotifications++;
-  updateUserNotificationCounter();
+async function sendTelegramNotification(pedido) {
+  const message = `📦 *PEDIDO #${pedido.codigo}* - ${pedido.status}\n\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}`;
+
+  try {
+    const messageUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    const messageResponse = await fetch(messageUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text: message,
+        parse_mode: 'Markdown'
+      })
+    });
+
+    const messageResult = await messageResponse.json();
+    
+    if (messageResult.ok && messageResult.result) {
+      messageIds[pedido.codigo] = messageResult.result.message_id;
+    }
+    
+    if (pedido.mapaUrl) {
+      await sendLocalizacaoToTelegram(pedido);
+    }
+    
+    if (pedido.comprovante) {
+      await sendComprovanteToTelegram(pedido);
+    }
+
+    if (!messageResult.ok) {
+      console.error('Erro Telegram:', messageResult);
+    }
+  } catch (error) {
+    console.error('Erro ao conectar com Telegram:', error);
+  }
 }
 
-async function sendTelegramNotification(pedido) {
-  const message = `🆕 *NOVO PEDIDO N° ${pedido.codigo}*\n\n*Resumo do Pedido:*\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}\n\n_Pedido realizado - Aguardando confirmação do pagamento_`;
-  
+async function sendLocalizacaoToTelegram(pedido) {
   try {
+    const message = `📍 *LOCALIZAÇÃO DO PEDIDO #${pedido.codigo}*\n\n🗺️ [Abrir no Google Maps](${pedido.mapaUrl})\n📱 Cliente: ${pedido.whatsapp}\n🏠 Endereço: ${pedido.local}`;
+
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
     const response = await fetch(url, {
       method: 'POST',
@@ -304,21 +309,121 @@ async function sendTelegramNotification(pedido) {
         parse_mode: 'Markdown'
       })
     });
-    
-    const result = await response.json();
-    if (!result.ok) {
-      console.error('Erro Telegram:', result);
-      throw new Error('Erro ao enviar para Telegram');
-    }
-    return true;
   } catch (error) {
-    console.error('Erro ao conectar com Telegram:', error);
-    throw error;
+    console.error('Erro ao enviar localização:', error);
   }
 }
 
+async function sendComprovanteToTelegram(pedido) {
+  try {
+    const base64Data = pedido.comprovante.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const blob = new Blob([bytes], { type: pedido.comprovanteTipo });
+    const formData = new FormData();
+    formData.append('chat_id', CHAT_ID);
+    formData.append('document', blob, pedido.comprovanteNome);
+    formData.append('caption', `📎 COMPROVANTE PEDIDO #${pedido.codigo}\n💳 Valor: R$ ${pedido.total.toFixed(2)}\n📱 Cliente: ${pedido.whatsapp}`);
+
+    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData
+    });
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error('Erro ao enviar comprovante:', result);
+    }
+  } catch (error) {
+    console.error('Erro ao enviar comprovante para Telegram:', error);
+  }
+}
+
+function gerarNotaFiscal(pedido) {
+  return {
+    codigo: pedido.codigo,
+    data: pedido.data,
+    cliente: {
+      telefone: pedido.whatsapp,
+      endereco: pedido.local
+    },
+    itens: pedido.produtos.map(item => ({
+      nome: item.nome,
+      quantidade: item.qtd,
+      preco_unitario: item.preco,
+      subtotal: item.preco * item.qtd
+    })),
+    totais: {
+      subtotal: pedido.produtos.reduce((sum, item) => sum + (item.preco * item.qtd), 0),
+      total: pedido.total
+    },
+    status: pedido.status,
+    comprovante: pedido.comprovante ? "Enviado" : "Não enviado"
+  };
+}
+
+function exportarNotaFiscal() {
+  const pedidosPagos = orders.filter(pedido => 
+    pedido.status.includes('Pagamento confirmado') || 
+    pedido.status.includes('entregue') ||
+    pedido.status.includes('entregue')
+  );
+  
+  if (pedidosPagos.length === 0) {
+    alert('Nenhum pedido pago encontrado! A nota fiscal só está disponível para pedidos com pagamento confirmado.');
+    return;
+  }
+  
+  const notasFiscais = pedidosPagos.map(pedido => gerarNotaFiscal(pedido));
+  const dataStr = JSON.stringify(notasFiscais, null, 2);
+  const dataBlob = new Blob([dataStr], {type: 'application/json'});
+  
+  const url = URL.createObjectURL(dataBlob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `notas-fiscais-${new Date().toISOString().split('T')[0]}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function baixarNotaFiscalIndividual(codigo) {
+  const pedido = orders.find(o => o.codigo === codigo);
+  if (!pedido) {
+    alert('Pedido não encontrado!');
+    return;
+  }
+
+  if (!pedido.status.includes('Pagamento confirmado') && 
+      !pedido.status.includes('entregue') &&
+      !pedido.status.includes('entregue')) {
+    alert('Nota fiscal só disponível para pedidos com pagamento confirmado!');
+    return;
+  }
+  
+  const notaFiscal = gerarNotaFiscal(pedido);
+  const dataStr = JSON.stringify(notaFiscal, null, 2);
+  const dataBlob = new Blob([dataStr], {type: 'application/json'});
+  
+  const url = URL.createObjectURL(dataBlob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `nota-fiscal-${codigo}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function goBack(){
-  if(currentView === 'categories' || currentView === 'category-products' || currentView === 'cart' || currentView === 'notifs' || currentView === 'admin' || currentView === 'user-notifs'){
+  if(currentView === 'categories' || currentView === 'category-products' || currentView === 'cart' || currentView === 'notifs'){
     showHome();
   } else if(currentView === 'product-list'){
     showCategories();
@@ -327,21 +432,6 @@ function goBack(){
 
 function openContact(){ 
   alert("Telefone: (11) 99999-9999\nEmail: contato@delivery.com\nChave PIX: 123.456.789-00"); 
-}
-
-function openUser(){
-  let tipo = prompt("Digite 'admin' para acessar admin, deixe vazio para usuário:");
-  if(tipo && tipo.toLowerCase()==='admin'){
-    let email = prompt("Email:");
-    let senha = prompt("Senha:");
-    if(email==="admin@local" && senha==="admin123"){ 
-      showAdminOrders(); 
-    } else {
-      alert("Credenciais inválidas");
-    }
-  } else {
-    showUserNotifications();
-  }
 }
 
 function showHome(){
@@ -436,10 +526,10 @@ function showCart(){
     html += `
       <div class='card'>
         <h3>Total: R$ ${total.toFixed(2)}</h3>
-        <div class="button-group">
-          <button onclick='startCheckout()' class="btn">Finalizar Pedido</button>
-          <button onclick='clearCart()' class="btn-ghost">Limpar Carrinho</button>
+        <div class="finalizar-btn-container">
+          <button onclick='startCheckout()' class="btn" style="width: 100%; padding: 15px; font-size: 18px;">✅ Finalizar Pedido</button>
         </div>
+        <button onclick='clearCart()' class="btn-ghost">Limpar Carrinho</button>
       </div>`;
   }
   
@@ -482,39 +572,29 @@ async function getEnderecoFromCoords(lat, lng) {
     
     if(data && data.address) {
       const addr = data.address;
-      
       let enderecoCompleto = '';
       
       if(addr.house_number) enderecoCompleto += addr.house_number + ', ';
       if(addr.road) enderecoCompleto += addr.road;
-      if(addr.neighbourhood) enderecoCompleto += ', Bairro ' + addr.neighbourhood;
+      if(addr.neighbourhood) enderecoCompleto += ', ' + addr.neighbourhood;
       if(addr.suburb && addr.suburb !== addr.neighbourhood) enderecoCompleto += ', ' + addr.suburb;
-      if(addr.city) enderecoCompleto += ', Cidade ' + addr.city;
-      if(addr.state) enderecoCompleto += ' - Estado ' + addr.state;
+      if(addr.city) enderecoCompleto += ', ' + addr.city;
+      if(addr.state) enderecoCompleto += ' - ' + addr.state;
       
       return {
         endereco: enderecoCompleto || `Localização: ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-        mapaUrl: `https://maps.google.com/?q=${lat},${lng}`,
-        bairro: addr.neighbourhood || addr.suburb || '',
-        cidade: addr.city || addr.town || addr.village || '',
-        estado: addr.state || ''
+        mapaUrl: `https://maps.google.com/?q=${lat},${lng}`
       };
     }
     return {
       endereco: `Localização: ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-      mapaUrl: `https://maps.google.com/?q=${lat},${lng}`,
-      bairro: '',
-      cidade: '',
-      estado: ''
+      mapaUrl: `https://maps.google.com/?q=${lat},${lng}`
     };
   } catch (error) {
     console.error('Erro ao buscar endereço:', error);
     return {
       endereco: `Localização: ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-      mapaUrl: `https://maps.google.com/?q=${lat},${lng}`,
-      bairro: '',
-      cidade: '',
-      estado: ''
+      mapaUrl: `https://maps.google.com/?q=${lat},${lng}`
     };
   }
 }
@@ -539,7 +619,7 @@ function startCheckout(){
         },
         function(error){
           console.log('Erro GPS:', error);
-          showDadosEntrega({endereco: '', mapaUrl: '', bairro: '', cidade: '', estado: ''});
+          showDadosEntrega({endereco: '', mapaUrl: ''});
         },
         {
           enableHighAccuracy: true,
@@ -548,10 +628,10 @@ function startCheckout(){
         }
       );
     } else {
-      showDadosEntrega({endereco: '', mapaUrl: '', bairro: '', cidade: '', estado: ''});
+      showDadosEntrega({endereco: '', mapaUrl: ''});
     }
   } else {
-    showDadosEntrega({endereco: '', mapaUrl: '', bairro: '', cidade: '', estado: ''});
+    showDadosEntrega({endereco: '', mapaUrl: ''});
   }
 }
 
@@ -570,13 +650,10 @@ function showDadosEntrega(localizacaoData) {
       <form id="dadosForm">
         <input type="tel" class="input-field" id="whatsapp" placeholder="Seu Telefone (com DDD)" required>
         <input type="text" class="input-field" id="endereco" placeholder="Endereço completo" value="${localizacaoData.endereco || ''}" required>
-        <input type="text" class="input-field" id="bairro" placeholder="Bairro" value="${localizacaoData.bairro || ''}" required>
-        <input type="text" class="input-field" id="cidade" placeholder="Cidade" value="${localizacaoData.cidade || ''}" required>
-        <input type="text" class="input-field" id="estado" placeholder="Estado" value="${localizacaoData.estado || ''}" required>
         <input type="text" class="input-field" id="complemento" placeholder="Complemento ou ponto de referência" maxlength="30">
         <input type="hidden" id="mapaUrl" value="${localizacaoData.mapaUrl || ''}">
         
-        <div class="button-group">
+        <div style="margin-top: 15px;">
           <button type="submit" class="btn">Continuar para Pagamento</button>
           <button type="button" class="btn-ghost" onclick="showCart()">← Voltar</button>
         </div>
@@ -591,13 +668,10 @@ function showDadosEntrega(localizacaoData) {
     
     const whatsapp = document.getElementById('whatsapp').value;
     const endereco = document.getElementById('endereco').value;
-    const bairro = document.getElementById('bairro').value;
-    const cidade = document.getElementById('cidade').value;
-    const estado = document.getElementById('estado').value;
     const complemento = document.getElementById('complemento').value;
     const mapaUrl = document.getElementById('mapaUrl').value;
     
-    if (!whatsapp || !endereco || !bairro || !cidade || !estado) {
+    if (!whatsapp || !endereco) {
       alert('Por favor, preencha todos os campos obrigatórios.');
       return;
     }
@@ -607,15 +681,10 @@ function showDadosEntrega(localizacaoData) {
       return;
     }
     
-    const enderecoCompleto = `${endereco}, ${bairro}, ${cidade} - ${estado}${complemento ? ', ' + complemento : ''}`;
-    
     showUploadComprovante({
-      endereco: enderecoCompleto,
+      endereco: endereco,
       mapaUrl: mapaUrl,
-      whatsapp: whatsapp,
-      bairro: bairro,
-      cidade: cidade,
-      estado: estado
+      whatsapp: whatsapp
     }, complemento);
   };
 }
@@ -659,10 +728,10 @@ function showUploadComprovante(localizacaoData, descricao) {
       
       <div id="fileInfo"></div>
       
-      <div class="button-group">
-        <button class="btn" id="submitBtn" disabled onclick="finalizarPedidoComComprovante('${localizacaoData.endereco.replace(/'/g, "\\'")}', '${(descricao || '').replace(/'/g, "\\'")}', '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', '${localizacaoData.whatsapp.replace(/'/g, "\\'")}')">✅ Finalizar Pedido</button>
-        <button class="btn-ghost" onclick="showDadosEntrega({endereco: '${localizacaoData.endereco.replace(/'/g, "\\'")}', mapaUrl: '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', bairro: '${localizacaoData.bairro.replace(/'/g, "\\'")}', cidade: '${localizacaoData.cidade.replace(/'/g, "\\'")}', estado: '${localizacaoData.estado.replace(/'/g, "\\'")}'})">← Voltar</button>
+      <div class="finalizar-btn-container">
+        <button class="btn" id="submitBtn" disabled onclick="finalizarPedidoComComprovante('${localizacaoData.endereco.replace(/'/g, "\\'")}', '${(descricao || '').replace(/'/g, "\\'")}', '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}', '${localizacaoData.whatsapp.replace(/'/g, "\\'")}')" style="width: 100%; padding: 15px; font-size: 18px;">✅ Finalizar Pedido</button>
       </div>
+      <button class="btn-ghost" onclick="showDadosEntrega({endereco: '${localizacaoData.endereco.replace(/'/g, "\\'")}', mapaUrl: '${localizacaoData.mapaUrl.replace(/'/g, "\\'")}'})">← Voltar</button>
     </div>
   `;
   
@@ -748,34 +817,28 @@ function showUploadComprovante(localizacaoData, descricao) {
         comprovanteNome: selectedFile.name,
         comprovanteTipo: selectedFile.type,
         data: new Date().toLocaleString('pt-BR'),
-        status: 'Pedido realizado - Aguardando confirmação do pagamento'
+        status: 'Pedido recebido - Aguardando confirmação do pagamento'
       };
       
-      try {
-        // SALVAR NO FIREBASE
-        const pedidoId = await salvarPedidoFirebase(pedido);
-        
-        // ENVIAR PARA TELEGRAM
-        await sendTelegramNotification(pedido);
-        
-        userNotifications.push({
-          codigo: codigoPedido,
-          msg: `✅ Pedido #${codigoPedido} confirmado! Aguardando confirmação do pagamento`,
-          data: pedido.data
-        });
-        
-        addUserNotification();
-        saveToStorage();
-        
-        alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Mensagem enviada para: ${whatsapp}\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n📢 Notificação enviada para o administrador!`);
-        
-        cart = [];
-        saveToStorage();
-        showHome();
-      } catch (error) {
-        alert('❌ Erro ao finalizar pedido. Tente novamente.');
-        console.error('Erro:', error);
-      }
+      orders.push(pedido);
+      notifications.push({
+        codigo: codigoPedido,
+        msg: `Pedido #${codigoPedido} realizado - R$ ${totalPedido.toFixed(2)} - Status: Aguardando pagamento`,
+        data: pedido.data,
+        notaFiscal: gerarNotaFiscal(pedido),
+        status: pedido.status
+      });
+      
+      addNotification();
+      saveToStorage();
+      
+      await sendTelegramNotification(pedido);
+      
+      alert(`✅ Pedido #${pedido.codigo} confirmado!\n📱 Notificação enviada para o administrador\n💰 Total: R$ ${totalPedido.toFixed(2)}\n📍 Entrega em: ${localizacao}\n\n💎 Use o botão "Nota Fiscal" para baixar seus pedidos!`);
+      
+      cart = [];
+      saveToStorage();
+      showHome();
     };
     
     reader.onerror = function() {
@@ -790,115 +853,30 @@ function showNotifs(){
   currentView = 'notifs';
   unreadNotifications = 0;
   updateNotificationCounter();
-  
-  let html = '<h3>Notificações do Sistema</h3>';
-  
-  if(orders.length === 0){ 
-    html += '<p>Nenhuma notificação.</p>';
-  } else {
-    orders.forEach(pedido => {
-      html += `<div class='card'>
-        <b>Pedido #${pedido.codigo}</b>
-        <div>${pedido.status}</div>
-        <small>${pedido.data}</small>
-      </div>`;
-    });
-  }
-  
-  document.getElementById('view').innerHTML = html;
-}
-
-function showUserNotifications(){
-  currentView = 'user-notifs';
-  unreadUserNotifications = 0;
-  updateUserNotificationCounter();
   saveToStorage();
   
-  let html = '<h3>Suas Notificações</h3>';
+  let html = '<h3>Notificações dos Pedidos</h3>';
   
-  if(userNotifications.length === 0){ 
+  if(notifications.length === 0){ 
     html += '<p>Nenhuma notificação.</p>';
   } else {
-    userNotifications.slice().reverse().forEach(notif => {
+    notifications.slice().reverse().forEach(notif => {
+      const podeBaixar = notif.status && (
+        notif.status.includes('Pagamento confirmado') || 
+        notif.status.includes('entregue') ||
+        notif.status.includes('entregue')
+      );
+      
       html += `<div class='card'>
         <b>Pedido #${notif.codigo}</b>
         <div>${notif.msg}</div>
         <small>${notif.data}</small>
+        ${podeBaixar ? `<button class="btn" onclick="baixarNotaFiscalIndividual(${notif.codigo})" style="margin-top: 10px;">📄 Baixar Nota Fiscal</button>` : ''}
       </div>`;
     });
   }
   
   document.getElementById('view').innerHTML = html;
-}
-
-async function showAdminOrders(){
-  currentView = 'admin';
-  
-  document.getElementById('view').innerHTML = '<div class="loading">📦 Carregando pedidos...</div>';
-  
-  await carregarPedidosFirebase();
-  
-  let html = '<h3>Pedidos - Área Administrativa</h3>';
-  
-  if(orders.length === 0){ 
-    html += '<p>Nenhum pedido realizado.</p>';
-  } else {
-    orders.forEach(pedido => {
-      const comprovanteHtml = pedido.comprovante ? 
-        `<p><strong>Comprovante:</strong> 
-          <a href="${pedido.comprovante}" target="_blank" download="comprovante_${pedido.codigo}.${pedido.comprovanteTipo === 'application/pdf' ? 'pdf' : 'jpg'}">
-            📎 Ver Comprovante (${pedido.comprovanteNome})
-          </a>
-        </p>` : 
-        '<p><strong>Comprovante:</strong> ❌ Não enviado</p>';
-      
-      const mapaHtml = pedido.mapaUrl ? 
-        `<p><strong>📍 Mapa:</strong> <a href="${pedido.mapaUrl}" target="_blank">Abrir localização</a></p>` : 
-        '';
-      
-      html += `<div class='card'>
-        <h4>Pedido #${pedido.codigo}</h4>
-        <p><strong>📱 Telefone:</strong> ${pedido.whatsapp}</p>
-        <p><strong>Status:</strong> ${pedido.status}</p>
-        <p><strong>Data:</strong> ${pedido.data}</p>
-        <p><strong>Endereço:</strong> ${pedido.local}</p>
-        ${mapaHtml}
-        <p><strong>Total:</strong> R$ ${pedido.total.toFixed(2)}</p>
-        ${comprovanteHtml}
-        <p><strong>Itens:</strong> ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}</p>
-        <div class="button-group">
-          <button class="btn" onclick='atualizarStatus("${pedido.id}","Pagamento confirmado - Preparando pedido")'>✅ Confirmar Pagamento</button>
-          <button class="btn" onclick='atualizarStatus("${pedido.id}","Pedido em rota de entrega")'>🚚 Saiu para Entrega</button>
-          <button class="btn" onclick='atualizarStatus("${pedido.id}","Pedido entregue")'>🎉 Entregue</button>
-        </div>
-      </div>`;
-    });
-  }
-  
-  document.getElementById('view').innerHTML = html;
-}
-
-async function atualizarStatus(pedidoId, novoStatus){
-  const success = await atualizarStatusFirebase(pedidoId, novoStatus);
-  
-  if (success) {
-    const pedido = orders.find(o => o.id === pedidoId);
-    if (pedido) {
-      userNotifications.push({
-        codigo: pedido.codigo,
-        msg: `🔄 Pedido #${pedido.codigo} atualizado: ${novoStatus}`,
-        data: new Date().toLocaleString('pt-BR')
-      });
-      
-      addUserNotification();
-      saveToStorage();
-      
-      alert(`✅ Status do pedido #${pedido.codigo} atualizado para: ${novoStatus}\n📱 Mensagem enviada para o cliente: ${pedido.whatsapp}`);
-      showAdminOrders();
-    }
-  } else {
-    alert('❌ Erro ao atualizar status do pedido');
-  }
 }
 
 window.showHome = showHome;
@@ -906,25 +884,18 @@ window.showCategories = showCategories;
 window.showCategoryProducts = showCategoryProducts;
 window.showCart = showCart;
 window.showNotifs = showNotifs;
-window.showUserNotifications = showUserNotifications;
 window.addToCart = addToCart;
 window.incQty = incQty;
 window.decQty = decQty;
 window.clearCart = clearCart;
 window.startCheckout = startCheckout;
-window.showAdminOrders = showAdminOrders;
-window.atualizarStatus = atualizarStatus;
 window.openContact = openContact;
-window.openUser = openUser;
 window.goBack = goBack;
+window.exportarNotaFiscal = exportarNotaFiscal;
+window.baixarNotaFiscalIndividual = baixarNotaFiscalIndividual;
 
-// Aguardar Firebase carregar e iniciar
-setTimeout(() => {
-  loadFromStorage();
-  showHome();
-  iniciarOuvintePedidos();
-  limparDadosAntigos();
-}, 1000);
+loadFromStorage();
+showHome();
 </script>
 
 </body>
