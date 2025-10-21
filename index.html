@@ -97,7 +97,7 @@ async function checkTelegramUpdates() {
           
           if (text.startsWith('/status') && !processedCommands.has(commandId)) {
             processedCommands.add(commandId);
-            processarComandoStatus(text, update.message.from.first_name);
+            processarComandoStatus(text);
           }
         }
         lastUpdateId = update.update_id;
@@ -108,7 +108,7 @@ async function checkTelegramUpdates() {
   }
 }
 
-function processarComandoStatus(text, adminNome) {
+function processarComandoStatus(text) {
   const match = text.match(/\/status(\d+)\s+(\w+)/);
   if (match) {
     const codigo = parseInt(match[1]);
@@ -123,12 +123,12 @@ function processarComandoStatus(text, adminNome) {
     
     if (statusMap[status]) {
       const novoStatus = statusMap[status];
-      atualizarStatusPedido(codigo, novoStatus, adminNome);
+      atualizarStatusPedido(codigo, novoStatus);
     }
   }
 }
 
-function atualizarStatusPedido(codigo, novoStatus, adminNome) {
+function atualizarStatusPedido(codigo, novoStatus) {
   const pedido = orders.find(o => o.codigo === codigo);
   if (pedido && pedido.status !== novoStatus) {
     pedido.status = novoStatus;
@@ -140,7 +140,7 @@ function atualizarStatusPedido(codigo, novoStatus, adminNome) {
     if (!notificacaoExistente) {
       notifications.push({
         codigo: codigo,
-        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus} por ${adminNome}`,
+        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
         data: new Date().toLocaleString('pt-BR'),
         notaFiscal: gerarNotaFiscal(pedido),
         status: novoStatus
@@ -565,7 +565,7 @@ function clearCart(){
 
 async function getEnderecoFromCoords(lat, lng) {
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format:json&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
     const data = await response.json();
     
     if(data && data.address) {
