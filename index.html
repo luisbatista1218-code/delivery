@@ -81,7 +81,6 @@ let products = [
 ];
 let lastUpdateId = 0;
 let messageIds = {};
-let processedCommands = new Set();
 
 async function checkTelegramUpdates() {
   try {
@@ -93,11 +92,8 @@ async function checkTelegramUpdates() {
       data.result.forEach(update => {
         if (update.message && update.message.text) {
           const text = update.message.text;
-          const commandId = `${update.update_id}_${text}`;
-          
-          if (text.startsWith('/status') && !processedCommands.has(commandId)) {
-            processedCommands.add(commandId);
-            processarComandoStatus(text, update.message.from.first_name);
+          if (text.startsWith('/status')) {
+            processarComandoStatus(text);
           }
         }
         lastUpdateId = update.update_id;
@@ -108,8 +104,8 @@ async function checkTelegramUpdates() {
   }
 }
 
-function processarComandoStatus(text, adminNome) {
-  const match = text.match(/\/status(\d+)\s+(\w+)/);
+function processarComandoStatus(text) {
+  const match = text.match(/\/status(\d+)\s+(.+)/);
   if (match) {
     const codigo = parseInt(match[1]);
     const status = match[2].toLowerCase();
@@ -121,47 +117,30 @@ function processarComandoStatus(text, adminNome) {
       'cancelado': '❌ Pedido cancelado'
     };
     
-    if (statusMap[status]) {
-      const novoStatus = statusMap[status];
-      atualizarStatusPedido(codigo, novoStatus, adminNome);
-    }
-  }
-}
-
-function atualizarStatusPedido(codigo, novoStatus, adminNome) {
-  const pedido = orders.find(o => o.codigo === codigo);
-  if (pedido && pedido.status !== novoStatus) {
-    pedido.status = novoStatus;
-    
-    const notificacaoExistente = notifications.find(n => 
-      n.codigo === codigo && n.status === novoStatus
-    );
-    
-    if (!notificacaoExistente) {
-      notifications.push({
-        codigo: codigo,
-        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
-        data: new Date().toLocaleString('pt-BR'),
-        notaFiscal: gerarNotaFiscal(pedido),
-        status: novoStatus
-      });
+    const pedido = orders.find(o => o.codigo === codigo);
+    if (pedido) {
+      const novoStatus = statusMap[status] || status;
+      pedido.status = novoStatus;
       
-      addNotification();
-    }
-    
-    saveToStorage();
-    
-    if (messageIds[codigo]) {
-      atualizarMensagemTelegram(codigo, pedido, messageIds[codigo]);
-    }
-    
-    if (currentView === 'notifs') {
-      showNotifs();
+      if (statusMap[status]) {
+        notifications.push({
+          codigo: codigo,
+          msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
+          data: new Date().toLocaleString('pt-BR'),
+          status: novoStatus
+        });
+        addNotification();
+      }
+      
+      saveToStorage();
+      if (messageIds[codigo]) {
+        atualizarMensagemTelegram(codigo, pedido, messageIds[codigo]);
+      }
     }
   }
 }
 
-async function atualizarMensagemTelegram(codigo, pedido, messageId) {
+function atualizarMensagemTelegram(codigo, pedido, messageId) {
   const message = `📦 *PEDIDO #${pedido.codigo}* - ${pedido.status}\n\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}`;
 
   try {
@@ -178,11 +157,6 @@ async function atualizarMensagemTelegram(codigo, pedido, messageId) {
         parse_mode: 'Markdown'
       })
     });
-
-    const result = await response.json();
-    if (!result.ok && result.error_code === 400) {
-      delete messageIds[codigo];
-    }
   } catch (error) {
     console.error('Erro ao atualizar mensagem:', error);
   }
@@ -556,7 +530,7 @@ function clearCart(){
 
 async function getEnderecoFromCoords(lat, lng) {
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format: 'json'&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
     const data = await response.json();
     
     if(data && data.address) {
@@ -814,7 +788,6 @@ function showUploadComprovante(localizacaoData, descricao) {
         codigo: codigoPedido,
         msg: `Pedido #${codigoPedido} realizado - R$ ${totalPedido.toFixed(2)} - Status: Aguardando pagamento`,
         data: pedido.data,
-        notaFiscal: gerarNotaFiscal(pedido),
         status: pedido.status
       });
       
