@@ -565,16 +565,16 @@ function clearCart(){
 
 async function getEnderecoFromCoords(lat, lng) {
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format:json&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=pt-BR`);
     const data = await response.json();
     
     if(data && data.address) {
       const addr = data.address;
       let enderecoCompleto = '';
       
-      if(addr.house_number) enderecoCompleto += addr.house_number + ', ';
       if(addr.road) enderecoCompleto += addr.road;
-      if(addr.neighbourhood) enderecoCompleto += ', ' + addr.neighbourhood;
+      if(addr.house_number) enderecoCompleto += ', ' + addr.house_number;
+      if(addr.neighbourhood) enderecoCompleto += ' - ' + addr.neighbourhood;
       if(addr.suburb && addr.suburb !== addr.neighbourhood) enderecoCompleto += ', ' + addr.suburb;
       if(addr.city) enderecoCompleto += ', ' + addr.city;
       if(addr.state) enderecoCompleto += ' - ' + addr.state;
