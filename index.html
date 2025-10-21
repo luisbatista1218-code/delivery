@@ -81,6 +81,7 @@ let products = [
 ];
 let lastUpdateId = 0;
 let messageIds = {};
+let processedCommands = new Set();
 
 async function checkTelegramUpdates() {
   try {
@@ -92,7 +93,10 @@ async function checkTelegramUpdates() {
       data.result.forEach(update => {
         if (update.message && update.message.text) {
           const text = update.message.text;
-          if (text.startsWith('/status')) {
+          const commandId = `${update.update_id}_${text}`;
+          
+          if (text.startsWith('/status') && !processedCommands.has(commandId)) {
+            processedCommands.add(commandId);
             processarComandoStatus(text, update.message.from.first_name);
           }
         }
@@ -129,19 +133,26 @@ function atualizarStatusPedido(codigo, novoStatus, adminNome) {
   if (pedido && pedido.status !== novoStatus) {
     pedido.status = novoStatus;
     
-    notifications.push({
-      codigo: codigo,
-      msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus}`,
-      data: new Date().toLocaleString('pt-BR'),
-      notaFiscal: gerarNotaFiscal(pedido),
-      status: novoStatus
-    });
+    const notificacaoExistente = notifications.find(n => 
+      n.codigo === codigo && n.status === novoStatus
+    );
     
-    addNotification();
+    if (!notificacaoExistente) {
+      notifications.push({
+        codigo: codigo,
+        msg: `🔄 Pedido #${codigo} atualizado: ${novoStatus} por ${adminNome}`,
+        data: new Date().toLocaleString('pt-BR'),
+        notaFiscal: gerarNotaFiscal(pedido),
+        status: novoStatus
+      });
+      
+      addNotification();
+    }
+    
     saveToStorage();
     
     if (messageIds[codigo]) {
-      atualizarMensagemTelegram(codigo, pedido, messageIds[codigo]);
+      atualizarMensagemTelegram(codigo, pedido);
     }
     
     if (currentView === 'notifs') {
@@ -150,7 +161,7 @@ function atualizarStatusPedido(codigo, novoStatus, adminNome) {
   }
 }
 
-async function atualizarMensagemTelegram(codigo, pedido, messageId) {
+async function atualizarMensagemTelegram(codigo, pedido) {
   const message = `📦 *PEDIDO #${pedido.codigo}* - ${pedido.status}\n\n💰 *Total:* R$ ${pedido.total.toFixed(2)}\n📍 *Endereço:* ${pedido.local}\n📱 *Telefone:* ${pedido.whatsapp}\n📋 *Itens:* ${pedido.produtos.map(p => `${p.nome} (x${p.qtd})`).join(', ')}\n⏰ *Data:* ${pedido.data}`;
 
   try {
@@ -162,7 +173,7 @@ async function atualizarMensagemTelegram(codigo, pedido, messageId) {
       },
       body: JSON.stringify({
         chat_id: CHAT_ID,
-        message_id: messageId,
+        message_id: messageIds[codigo],
         text: message,
         parse_mode: 'Markdown'
       })
@@ -170,14 +181,14 @@ async function atualizarMensagemTelegram(codigo, pedido, messageId) {
 
     const result = await response.json();
     if (!result.ok) {
-      console.log('Erro ao atualizar mensagem:', result);
+      console.error('Erro ao atualizar mensagem:', result);
     }
   } catch (error) {
     console.error('Erro ao atualizar mensagem:', error);
   }
 }
 
-setInterval(checkTelegramUpdates, 3000);
+setInterval(checkTelegramUpdates, 2000);
 
 function loadFromStorage() {
   try {
@@ -271,6 +282,10 @@ async function sendTelegramNotification(pedido) {
     if (pedido.comprovante) {
       await sendComprovanteToTelegram(pedido);
     }
+
+    if (!messageResult.ok) {
+      console.error('Erro Telegram:', messageResult);
+    }
   } catch (error) {
     console.error('Erro ao conectar com Telegram:', error);
   }
@@ -318,6 +333,11 @@ async function sendComprovanteToTelegram(pedido) {
       method: 'POST',
       body: formData
     });
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error('Erro ao enviar comprovante:', result);
+    }
   } catch (error) {
     console.error('Erro ao enviar comprovante para Telegram:', error);
   }
